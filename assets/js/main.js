@@ -8,14 +8,15 @@
 
   /* ------------------------------------------------------------------
      INTRO
-     full  ≈ 5s  · short ≈ 1.5s (visita nas últimas 6h) · none
+     full ≈ 3s + voo da logo até o cabeçalho · none
      ------------------------------------------------------------------ */
-  var TIMING = {
-    full: { reveal: 4650, end: 5200 },
-    short: { reveal: 1450, end: 1950 }
-  };
+  var REVEAL_AT = 2250;
+  var FLIGHT = 900;   // voo da logo
+  var EXIT = 1150;    // voo + persianas (a última coluna termina por volta de 1.08s)
+  var FADE = 560;     // saída simples, só se o navegador não tiver Web Animations
   var timers = [];
   var finished = false;
+  var leaving = false;
 
   function ready() { root.classList.add('is-ready'); }
 
@@ -28,16 +29,58 @@
     detachSkipListeners();
   }
 
+  /* A logo da intro voa e pousa exatamente sobre a logo do cabeçalho.
+     viewBox da intro: "20 30 117 86"; as letras ocupam x 28.6–129.8, y 35–111.6. */
+  function flyLogo() {
+    var art = intro.querySelector('.intro__art');
+    var svg = art && art.querySelector('.intro__logo');
+    var target = document.querySelector('.topbar__logo svg');
+    if (!svg || !target || !art.animate) return false;
+
+    var r = svg.getBoundingClientRect();
+    var t = target.getBoundingClientRect();
+    if (!r.width || !t.width) return false;
+
+    var ox = (8.6 / 117) * r.width;            // início das letras dentro da arte
+    var oy = (5 / 86) * r.height;
+    var s = t.width / (r.width * 101.2 / 117);  // escala para a largura da logo do cabeçalho
+
+    art.style.left = r.left + 'px';
+    art.style.top = r.top + 'px';
+    art.style.transform = 'none';
+    art.style.transformOrigin = '0 0';
+
+    var dx = t.left - r.left - ox * s;
+    var dy = t.top - r.top - oy * s;
+    art.animate(
+      [
+        { transform: 'translate(0, 0) scale(1)' },
+        { transform: 'translate(' + (dx * 0.5) + 'px, ' + (dy * 0.42) + 'px) scale(' + (1 + (s - 1) * 0.55) + ') rotate(-2deg)', offset: 0.55 },
+        { transform: 'translate(' + dx + 'px, ' + dy + 'px) scale(' + (s * 1.07) + ')', offset: 0.86 },
+        { transform: 'translate(' + dx + 'px, ' + dy + 'px) scale(' + s + ')' }
+      ],
+      { duration: FLIGHT, easing: 'cubic-bezier(.7, 0, .2, 1)', fill: 'forwards' }
+    );
+    return true;
+  }
+
   function reveal() {
+    if (leaving || !intro) return;
+    leaving = true;
     ready();
-    if (intro) intro.classList.add('is-leaving');
+    if (flyLogo()) {
+      intro.classList.add('is-flying');
+      timers.push(setTimeout(teardown, EXIT));
+    } else {
+      intro.classList.add('is-leaving');
+      timers.push(setTimeout(teardown, FADE));
+    }
   }
 
   function skip() {
-    if (finished) return;
+    if (finished || leaving) return;
     timers.forEach(clearTimeout);
     reveal();
-    timers.push(setTimeout(teardown, 560));
   }
 
   function onKey(e) {
@@ -55,15 +98,16 @@
   }
 
   function play() {
-    var t = TIMING[mode];
     intro.classList.add('is-playing');
-    timers.push(setTimeout(reveal, t.reveal));
-    timers.push(setTimeout(teardown, t.end));
+    /* A caneta percorre o fio que conecta as letras (SMIL, sincronizado com o CSS) */
+    var pen = document.getElementById('penMotion');
+    if (pen && pen.beginElementAt) {
+      try { pen.beginElementAt(0.15); } catch (e) {}
+    }
+    timers.push(setTimeout(reveal, REVEAL_AT));
   }
 
-  try { localStorage.setItem('yatsar:intro', String(Date.now())); } catch (e) {}
-
-  if (intro && (mode === 'full' || mode === 'short')) {
+  if (intro && mode === 'full') {
     root.classList.add('is-intro');
 
     var skipBtn = document.getElementById('introSkip');
@@ -73,21 +117,7 @@
     window.addEventListener('wheel', onScrollIntent, { passive: true });
     window.addEventListener('touchmove', onScrollIntent, { passive: true });
 
-    if (mode === 'full') {
-      /* A fase da linha (0–1s) já está rodando enquanto a foto decodifica;
-         esperamos no máximo 700ms para não segurar ninguém. */
-      var img = document.getElementById('introImg');
-      var started = false;
-      var start = function () { if (!started && !finished) { started = true; play(); } };
-      if (img && img.complete && img.naturalWidth) start();
-      else {
-        if (img && img.decode) img.decode().then(start, start);
-        else if (img) { img.addEventListener('load', start); img.addEventListener('error', start); }
-        setTimeout(start, 700);
-      }
-    } else {
-      play();
-    }
+    play();
   } else {
     if (intro && intro.parentNode) intro.parentNode.removeChild(intro);
     ready();
